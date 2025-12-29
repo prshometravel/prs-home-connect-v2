@@ -39,9 +39,7 @@ export default function Home() {
            "https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
           
           >
-            Documentation
-          </a>
-        </div>
+         
       </main>
     </div>
   );
