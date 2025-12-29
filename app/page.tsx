@@ -24,7 +24,7 @@ export default function Home() {
         </div>
        
          
-            hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
+            
             href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
             target="_blank"
             rel="noopener noreferrer"
