@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "../../../lib/supabaseClient";
+import { createClient } from "@supabase/supabase-js";
 
 export default function HomeownerDashboardPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -10,93 +10,102 @@ export default function HomeownerDashboardPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const loadUser = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
 
-      if (user?.email) {
-        setUserEmail(user.email);
-      }
+    const loadUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.email) setUserEmail(user.email);
     };
 
     loadUser();
   }, []);
 
-  const handleCreateProfile = async () => {
-    if (!fullName || !state) {
-      alert("Please fill out all fields");
-      return;
-    }
-
+  const createProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true);
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    try {
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      );
 
-    if (!user) {
-      alert("Not authenticated");
+      // If you have a "homeowners" table, this will save the profile.
+      // If your table name is different, tell me and I’ll adjust.
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not signed in");
+
+      const { error } = await supabase
+        .from("homeowners")
+        .upsert(
+          {
+            user_id: user.id,
+            full_name: fullName,
+            state: state,
+            email: user.email,
+          },
+          { onConflict: "user_id" }
+        );
+
+      if (error) throw error;
+
+      alert("Profile created!");
+    } catch (err: any) {
+      alert(err?.message || "Error creating profile");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const { error } = await supabase.from("homeowners").insert({
-      user_id: user.id,
-      full_name: fullName,
-      state,
-    });
-
-    if (error) {
-      alert(error.message);
-    } else {
-      alert("Profile created successfully");
-    }
-
-    setLoading(false);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0b1d2a] via-[#102c3c] to-[#0b1d2a] px-6 py-10 text-white">
-      <div className="mx-auto max-w-xl rounded-2xl border border-white/10 bg-black/40 p-8 shadow-xl">
-        <h1 className="mb-2 text-3xl font-bold">Homeowner Profile</h1>
-
-        <p className="mb-6 text-white/70">
-          Create this once before posting jobs.
-        </p>
-
-        {/* EMAIL — FIXED (NO BLEED-THROUGH) */}
-        {userEmail && (
-          <div className="mb-6 inline-block rounded-md bg-black/60 px-4 py-2 text-sm font-semibold text-white">
-            Signed in as {userEmail}
-          </div>
-        )}
-
-        <div className="space-y-4">
-          <input
-            type="text"
-            placeholder="Full name"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            className="w-full rounded-lg bg-black/60 px-4 py-3 text-white placeholder-white/60 outline-none focus:ring-2 focus:ring-green-400"
-          />
-
-          <input
-            type="text"
-            placeholder="State"
-            value={state}
-            onChange={(e) => setState(e.target.value)}
-            className="w-full rounded-lg bg-black/60 px-4 py-3 text-white placeholder-white/60 outline-none focus:ring-2 focus:ring-green-400"
-          />
-
-          <button
-            onClick={handleCreateProfile}
-            disabled={loading}
-            className="w-full rounded-lg bg-green-500 py-3 font-bold text-black transition hover:bg-green-400 disabled:opacity-60"
-          >
-            {loading ? "Creating..." : "Create Profile"}
-          </button>
+    <div className="min-h-screen bg-[#0b1c2c] text-white">
+      <div className="mx-auto max-w-3xl px-4 py-10">
+        <div className="mb-8 rounded-2xl bg-white/10 p-6 shadow">
+          <h1 className="text-3xl font-bold">Homeowner Dashboard</h1>
+          <p className="mt-2 text-white/80">
+            Create this once before posting jobs.
+          </p>
+          <p className="mt-2 text-white/80">
+            Signed in as{" "}
+            <span className="font-semibold">{userEmail ?? "..."}</span>
+          </p>
         </div>
+
+        <form
+          onSubmit={createProfile}
+          className="rounded-2xl bg-white/10 p-6 shadow"
+        >
+          <h2 className="text-2xl font-semibold">Homeowner Profile</h2>
+
+          <div className="mt-6 space-y-4">
+            <input
+              className="w-full rounded-full bg-black/30 px-5 py-4 text-white placeholder-white/60 outline-none ring-1 ring-white/15 focus:ring-2 focus:ring-emerald-400"
+              placeholder="Full name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              required
+            />
+
+            <input
+              className="w-full rounded-full bg-black/30 px-5 py-4 text-white placeholder-white/60 outline-none ring-1 ring-white/15 focus:ring-2 focus:ring-emerald-400"
+              placeholder="State"
+              value={state}
+              onChange={(e) => setState(e.target.value)}
+              required
+            />
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="mt-4 w-full rounded-full bg-emerald-400 px-6 py-4 text-lg font-semibold text-black shadow-lg hover:bg-emerald-300 disabled:opacity-60"
+            >
+              {loading ? "Saving..." : "Create Profile"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
