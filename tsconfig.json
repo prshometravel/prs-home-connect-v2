@@ -17,6 +17,11 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "baseUrl": ".",
+    "paths": {
+      "@/lib/*": [
+        "lib/*"
+      ]
+    },
     "incremental": true,
     "plugins": [
       {
