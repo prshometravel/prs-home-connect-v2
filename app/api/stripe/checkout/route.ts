@@ -7,24 +7,26 @@ export async function POST(req: Request) {
 
     if (!secretKey) {
       return NextResponse.json(
-        { error: "Missing STRIPE_SECRET_KEY (check .env.local and Vercel env vars)" },
+        { error: "Missing STRIPE_SECRET_KEY" },
         { status: 500 }
       );
     }
 
-    // ✅ No apiVersion here (avoids TypeScript mismatch)
-    const stripe = new Stripe(secretKey);
+    const stripe = new Stripe(secretKey, {
+      apiVersion: "2023-10-16",
+    });
 
-    const body = await req.json().catch(() => ({} as any));
-    const jobId = body?.jobId ? String(body.jobId) : "";
+    const body = await req.json();
+    const jobId = body?.jobId;
+
+    if (!jobId) {
+      return NextResponse.json({ error: "Missing jobId" }, { status: 400 });
+    }
 
     const origin =
       req.headers.get("origin") ||
       process.env.NEXT_PUBLIC_SITE_URL ||
       "http://localhost:3000";
-
-    const successUrl = `${origin}/pro/dashboard?paid=1${jobId ? `&jobId=${encodeURIComponent(jobId)}` : ""}`;
-    const cancelUrl = `${origin}/pro/dashboard?paid=0${jobId ? `&jobId=${encodeURIComponent(jobId)}` : ""}`;
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -33,23 +35,22 @@ export async function POST(req: Request) {
         {
           price_data: {
             currency: "usd",
-            product_data: {
-              name: "Lead Access — PRS Home Connect",
-            },
-            unit_amount: 1000, // $10.00
+            unit_amount: 1000, // $10
+            product_data: { name: "Job Lead – PRS Home Connect" },
           },
           quantity: 1,
         },
       ],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      metadata: jobId ? { jobId } : undefined,
+      success_url: `${origin}/pro/jobs?paid=1&jobId=${encodeURIComponent(
+        jobId
+      )}`,
+      cancel_url: `${origin}/pro/jobs?canceled=1`,
+      metadata: { job_id: String(jobId) },
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (error: any) {
-    console.error("Stripe checkout error:", error);
-    return NextResponse.json({ error: "Stripe checkout failed" }, { status: 500 });
+  } catch (err: any) {
+    console.error("Stripe checkout error:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
-
