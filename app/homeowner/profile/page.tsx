@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
@@ -13,128 +15,139 @@ export default function HomeownerProfilePage() {
   const router = useRouter();
 
   const [userId, setUserId] = useState<string | null>(null);
-  const [email, setEmail] = useState<string>("");
-
+  const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [state, setState] = useState("");
   const [city, setCity] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  const [loading, setLoading] = useState(false);
-
-  // ✅ Get logged-in user
   useEffect(() => {
-    const getUser = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!data.user) {
-        alert("You must be signed in as a homeowner");
-        router.push("/homeowner/signin");
+    const loadUser = async () => {
+      const { data, error } = await supabase.auth.getUser();
+
+      if (error || !data.user) {
+        router.push("/signin");
         return;
       }
+
       setUserId(data.user.id);
       setEmail(data.user.email || "");
+
+      const { data: profile } = await supabase
+        .from("homeowners")
+        .select("*")
+        .eq("id", data.user.id)
+        .single();
+
+      if (profile) {
+        setFullName(profile.full_name || "");
+        setState(profile.state || "");
+        setCity(profile.city || "");
+        setPhone(profile.phone || "");
+        setAddress(profile.address || "");
+      }
+
+      setLoading(false);
     };
-    getUser();
+
+    loadUser();
   }, [router]);
 
-  // ✅ THIS is what your button was NOT calling correctly
-  const createProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!userId) {
-      alert("User not loaded yet");
-      return;
-    }
+  const handleSave = async () => {
+    if (!userId) return;
 
     setLoading(true);
 
-    const { error } = await supabase
-      .from("homeowners")
-      .upsert(
-        {
-          user_id: userId,
-          full_name: fullName,
-          state,
-          city,
-          phone,
-          address,
-          email,
-        },
-        { onConflict: "user_id" }
-      );
+    await supabase.from("homeowners").upsert({
+      id: userId,
+      email,
+      full_name: fullName,
+      state,
+      city,
+      phone,
+      address,
+    });
 
     setLoading(false);
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    alert("Homeowner profile created ✅");
-    router.push("/homeowner/dashboard");
+    alert("Profile saved");
   };
 
+  if (loading) return <div className="p-6">Loading profile...</div>;
+
   return (
-    <div className="min-h-screen bg-[#0b1c2c] text-white flex items-center justify-center">
-      <form
-        onSubmit={createProfile} // 🔑 REQUIRED
-        className="w-full max-w-xl bg-white/10 rounded-2xl p-8 space-y-4"
-      >
-        <h1 className="text-2xl font-bold">Homeowner Profile</h1>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <header className="bg-black text-white p-4 flex justify-between">
+        <button onClick={() => router.push("/")} className="text-sm underline">
+          ← Go Home
+        </button>
+        <span className="font-semibold">Homeowner Profile</span>
+      </header>
 
-        <input
-          className="w-full rounded-full px-4 py-3 bg-black/30"
-          placeholder="Full name"
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
-          required
-        />
+      <main className="flex-1 max-w-xl mx-auto p-6 bg-white mt-6 rounded shadow">
+        <label className="block mb-3">
+          Full Name
+          <input
+            className="w-full border p-2 rounded"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+          />
+        </label>
 
-        <input
-          className="w-full rounded-full px-4 py-3 bg-black/30"
-          placeholder="State"
-          value={state}
-          onChange={(e) => setState(e.target.value)}
-          required
-        />
+        <label className="block mb-3">
+          State
+          <input
+            className="w-full border p-2 rounded"
+            value={state}
+            onChange={(e) => setState(e.target.value)}
+          />
+        </label>
 
-        <input
-          className="w-full rounded-full px-4 py-3 bg-black/30"
-          placeholder="City"
-          value={city}
-          onChange={(e) => setCity(e.target.value)}
-          required
-        />
+        <label className="block mb-3">
+          City
+          <input
+            className="w-full border p-2 rounded"
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+          />
+        </label>
 
-        <input
-          className="w-full rounded-full px-4 py-3 bg-black/30"
-          placeholder="Phone"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          required
-        />
+        <label className="block mb-3">
+          Phone
+          <input
+            className="w-full border p-2 rounded"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+          />
+        </label>
 
-        <input
-          className="w-full rounded-full px-4 py-3 bg-black/30"
-          placeholder="Address"
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          required
-        />
+        <label className="block mb-4">
+          Address
+          <input
+            className="w-full border p-2 rounded"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+          />
+        </label>
 
         <button
-          type="submit" // 🔑 REQUIRED
-          disabled={loading}
-          className="w-full rounded-full bg-emerald-400 py-4 text-black font-semibold text-lg"
+          onClick={handleSave}
+          className="w-full bg-green-600 text-white py-2 rounded"
         >
-          {loading ? "Saving..." : "Create Profile"}
+          Save Profile
         </button>
+      </main>
 
-        <p className="text-center text-white/60 text-sm">
-          PRS Home Connect — built by PRS Home Improvement and Security LLC
-        </p>
-      </form>
+      <footer className="mt-10 text-center text-sm text-gray-500 p-4">
+        <div>
+          Sponsored by <strong>Sista’s Compassionate Care Services</strong>
+        </div>
+        <div className="mt-1">
+          Built & maintained by{" "}
+          <strong>PRS Home Improvement and Security LLC</strong>
+        </div>
+      </footer>
     </div>
   );
 }
