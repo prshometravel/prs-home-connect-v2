@@ -1,297 +1,181 @@
 "use client";
 
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import { createSupabaseBrowser } from "../../_shared/supabase-browser";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
-const supabase =
-  supabaseUrl && supabaseAnonKey
-    ? createClient(supabaseUrl, supabaseAnonKey)
-    : null;
+type JobRow = {
+  id: string;
+  title: string | null;
+  description: string | null;
+  city: string | null;
+  state: string | null;
+  status: string | null;
+  created_at: string | null;
+};
 
 export default function HomeownerDashboardPage() {
   const router = useRouter();
+  const supabase = useMemo(() => createSupabaseBrowser(), []);
 
-  const [userEmail, setUserEmail] = useState<string>("");
-  const [loadingUser, setLoadingUser] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobs, setJobs] = useState<JobRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  const [fullName, setFullName] = useState("");
-  const [stateVal, setStateVal] = useState("");
-  const [city, setCity] = useState("");
-  const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
+  async function loadJobs() {
+    setJobsLoading(true);
+    setError(null);
 
-  const [saving, setSaving] = useState(false);
+    const { data, error: jobsErr } = await supabase
+      .from("jobs")
+      .select("id,title,description,city,state,status,created_at")
+      .order("created_at", { ascending: false });
 
-  useEffect(() => {
-    (async () => {
-      try {
-        if (!supabase) {
-          alert("Missing Supabase env vars (NEXT_PUBLIC_SUPABASE_URL / ANON_KEY)");
-          return;
-        }
-        const { data } = await supabase.auth.getUser();
-        const user = data?.user;
-
-        if (!user) {
-          router.push("/homeowner/signin");
-          return;
-        }
-        setUserEmail(user.email ?? "");
-      } catch (e: any) {
-        alert(e?.message ?? "Error loading user");
-      } finally {
-        setLoadingUser(false);
-      }
-    })();
-  }, [router]);
-
-  async function signOut() {
-    try {
-      if (!supabase) return;
-      await supabase.auth.signOut();
-      router.push("/signin");
-    } catch (e: any) {
-      alert(e?.message ?? "Sign out failed");
+    if (jobsErr) {
+      setError(jobsErr.message);
+      setJobs([]);
+    } else {
+      setJobs((data || []) as JobRow[]);
     }
+
+    setJobsLoading(false);
   }
 
-  async function createProfile(e: React.FormEvent) {
-    e.preventDefault();
+  useEffect(() => {
+    let alive = true;
 
-    try {
-      if (!supabase) {
-        alert("Missing Supabase env vars (NEXT_PUBLIC_SUPABASE_URL / ANON_KEY)");
+    (async () => {
+      setLoading(true);
+      setError(null);
+
+      const { data, error: authErr } = await supabase.auth.getSession();
+      if (!alive) return;
+
+      if (authErr) {
+        setError(authErr.message);
+        setLoading(false);
         return;
       }
 
-      setSaving(true);
-
-      const { data } = await supabase.auth.getUser();
-      const user = data?.user;
-
-      if (!user) {
-        alert("You are not signed in.");
-        router.push("/homeowner/signin");
+      if (!data.session) {
+        router.replace("/signin");
         return;
       }
 
-      // IMPORTANT: table name must be "homeowners"
-      const { error } = await supabase
-        .from("homeowners")
-        .upsert(
-          {
-            user_id: user.id,
-            email: user.email,
-            full_name: fullName.trim(),
-            state: stateVal,
-            city: city.trim(),
-            phone: phone.trim(),
-            address: address.trim(),
-          },
-          { onConflict: "user_id" }
-        );
+      setLoading(false);
+      await loadJobs();
+    })();
 
-      if (error) throw error;
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, supabase]);
 
-      alert("Homeowner profile saved ✅");
-      // optional: you can redirect after save
-      // router.push("/homeowner/post-job");
-    } catch (err: any) {
-      alert(err?.message ?? "Error creating profile");
-    } finally {
-      setSaving(false);
-    }
+  async function handleSignOut() {
+    setError(null);
+    await supabase.auth.signOut();
+    router.replace("/signin");
   }
 
   return (
-    <div className="min-h-screen bg-[#0b1c2c] text-white">
-      <div className="mx-auto max-w-4xl px-4 py-6">
-        {/* Top Bar */}
-        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <main className="min-h-screen bg-[#061A33] text-white">
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Homeowner Dashboard</h1>
-            <p className="text-white/80 text-sm">
-              Signed in as:{" "}
-              <span className="font-semibold">
-                {loadingUser ? "Loading..." : userEmail || "Unknown"}
-              </span>
-            </p>
+            <h1 className="text-2xl font-black">Homeowner Dashboard</h1>
+            <p className="text-sm text-white/70">Jobs</p>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <Link
               href="/"
-              className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/15"
+              className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 font-extrabold hover:bg-white/10"
             >
-              Go Home
+              Home
             </Link>
 
-            <div className="relative">
-              <details className="group">
-                <summary className="cursor-pointer list-none rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/15">
-                  Menu ▾
-                </summary>
-
-                <div className="absolute right-0 z-20 mt-2 w-56 rounded-xl bg-[#0b1c2c] p-2 shadow-xl ring-1 ring-white/10">
-                  <Link
-                    href="/homeowner/dashboard"
-                    className="block rounded-lg px-3 py-2 text-sm hover:bg-white/10"
-                  >
-                    Dashboard
-                  </Link>
-                  <Link
-                    href="/homeowner/profile"
-                    className="block rounded-lg px-3 py-2 text-sm hover:bg-white/10"
-                  >
-                    Profile
-                  </Link>
-                  <Link
-                    href="/homeowner/post-job"
-                    className="block rounded-lg px-3 py-2 text-sm hover:bg-white/10"
-                  >
-                    Post a Job
-                  </Link>
-                  <Link
-                    href="/jobs"
-                    className="block rounded-lg px-3 py-2 text-sm hover:bg-white/10"
-                  >
-                    Browse Jobs
-                  </Link>
-
-                  <button
-                    type="button"
-                    onClick={signOut}
-                    className="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm font-semibold text-red-200 hover:bg-white/10"
-                  >
-                    Sign out
-                  </button>
-                </div>
-              </details>
-            </div>
-          </div>
-        </div>
-
-        {/* Profile Card */}
-        <form
-          onSubmit={createProfile}
-          className="rounded-2xl bg-white/10 p-6 shadow"
-        >
-          <h2 className="text-xl font-semibold">Homeowner Profile</h2>
-          <p className="mt-1 text-sm text-white/80">
-            Create this once before posting jobs.
-          </p>
-
-          <div className="mt-6 space-y-4">
-            <input
-              className="w-full rounded-full bg-black/30 px-5 py-4 text-white placeholder-white/60 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-emerald-400"
-              placeholder="Full name"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              required
-            />
-
-            <select
-              className="w-full rounded-full bg-black/30 px-5 py-4 text-white outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-emerald-400"
-              value={stateVal}
-              onChange={(e) => setStateVal(e.target.value)}
-              required
-            >
-              <option value="">Select State</option>
-              <option value="AL">Alabama</option>
-              <option value="AK">Alaska</option>
-              <option value="AZ">Arizona</option>
-              <option value="AR">Arkansas</option>
-              <option value="CA">California</option>
-              <option value="CO">Colorado</option>
-              <option value="CT">Connecticut</option>
-              <option value="DE">Delaware</option>
-              <option value="FL">Florida</option>
-              <option value="GA">Georgia</option>
-              <option value="HI">Hawaii</option>
-              <option value="ID">Idaho</option>
-              <option value="IL">Illinois</option>
-              <option value="IN">Indiana</option>
-              <option value="IA">Iowa</option>
-              <option value="KS">Kansas</option>
-              <option value="KY">Kentucky</option>
-              <option value="LA">Louisiana</option>
-              <option value="ME">Maine</option>
-              <option value="MD">Maryland</option>
-              <option value="MA">Massachusetts</option>
-              <option value="MI">Michigan</option>
-              <option value="MN">Minnesota</option>
-              <option value="MS">Mississippi</option>
-              <option value="MO">Missouri</option>
-              <option value="MT">Montana</option>
-              <option value="NE">Nebraska</option>
-              <option value="NV">Nevada</option>
-              <option value="NH">New Hampshire</option>
-              <option value="NJ">New Jersey</option>
-              <option value="NM">New Mexico</option>
-              <option value="NY">New York</option>
-              <option value="NC">North Carolina</option>
-              <option value="ND">North Dakota</option>
-              <option value="OH">Ohio</option>
-              <option value="OK">Oklahoma</option>
-              <option value="OR">Oregon</option>
-              <option value="PA">Pennsylvania</option>
-              <option value="RI">Rhode Island</option>
-              <option value="SC">South Carolina</option>
-              <option value="SD">South Dakota</option>
-              <option value="TN">Tennessee</option>
-              <option value="TX">Texas</option>
-              <option value="UT">Utah</option>
-              <option value="VT">Vermont</option>
-              <option value="VA">Virginia</option>
-              <option value="WA">Washington</option>
-              <option value="WV">West Virginia</option>
-              <option value="WI">Wisconsin</option>
-              <option value="WY">Wyoming</option>
-            </select>
-
-            <input
-              className="w-full rounded-full bg-black/30 px-5 py-4 text-white placeholder-white/60 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-emerald-400"
-              placeholder="City"
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              required
-            />
-
-            <input
-              className="w-full rounded-full bg-black/30 px-5 py-4 text-white placeholder-white/60 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-emerald-400"
-              placeholder="Phone"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              required
-            />
-
-            <input
-              className="w-full rounded-full bg-black/30 px-5 py-4 text-white placeholder-white/60 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-emerald-400"
-              placeholder="Address"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              required
-            />
-
             <button
-              type="submit"
-              disabled={saving}
-              className="mt-2 w-full rounded-full bg-emerald-400 px-6 py-4 text-lg font-semibold text-black shadow-lg hover:opacity-95 disabled:opacity-60"
+              onClick={handleSignOut}
+              className="rounded-xl bg-emerald-500 px-4 py-2 font-extrabold text-[#041425] hover:bg-emerald-400"
             >
-              {saving ? "Saving..." : "Create Profile"}
+              Sign Out
+            </button>
+          </div>
+        </header>
+
+        {error && (
+          <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-500/10 p-4">
+            <div className="font-extrabold text-red-200">Error</div>
+            <div className="mt-1 text-red-100/90">{error}</div>
+          </div>
+        )}
+
+        <section className="mt-6 rounded-2xl border border-white/10 bg-[#0B2A52] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-xl font-black">All Jobs</h2>
+            <button
+              onClick={loadJobs}
+              className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 font-extrabold hover:bg-white/10"
+              disabled={loading || jobsLoading}
+            >
+              {jobsLoading ? "Loading..." : "Refresh"}
             </button>
           </div>
 
-          <div className="mt-6 text-center text-xs text-white/70">
-            PRS Home Connect — built by PRS Home Improvement and Security LLC
+          <div className="mt-4">
+            {loading ? (
+              <div className="text-white/70 font-semibold">Loading...</div>
+            ) : jobsLoading ? (
+              <div className="text-white/70 font-semibold">Loading jobs...</div>
+            ) : jobs.length === 0 ? (
+              <div className="rounded-2xl border border-white/10 bg-[#051C37] p-4">
+                <div className="font-extrabold">No jobs</div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3">
+                {jobs.map((j) => (
+                  <div
+                    key={j.id}
+                    className="rounded-2xl border border-white/10 bg-[#051C37] p-4"
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="truncate text-lg font-black">
+                          {j.title || "Untitled Job"}
+                        </div>
+
+                        <div className="mt-1 text-sm text-white/70">
+                          {(j.city || "") + (j.state ? `, ${j.state}` : "")}
+                        </div>
+
+                        {j.description ? (
+                          <div className="mt-2 text-sm text-white/70">
+                            {j.description}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-row flex-wrap gap-2 sm:flex-col sm:items-end">
+                        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-extrabold">
+                          {j.status || "open"}
+                        </span>
+                        <span className="text-xs text-white/60">
+                          {j.created_at
+                            ? new Date(j.created_at).toLocaleString()
+                            : ""}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        </form>
+        </section>
       </div>
-    </div>
+    </main>
   );
 }

@@ -1,0 +1,26 @@
+
+> prs-home-connect@0.1.0 build
+> next build
+
+▲ Next.js 16.1.6 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 41s
+  Skipping validation of types
+  Collecting page data using 1 worker ...
+Error: Neither apiKey nor config.authenticator provided
+    at r._setAuthenticator (.next/server/chunks/[root-of-the-server]__3cf3a48d._.js:1:87367)
+    at new r (.next/server/chunks/[root-of-the-server]__3cf3a48d._.js:1:81970)
+    at module evaluation (.next/server/chunks/[root-of-the-server]__771511ac._.js:1:1294)
+    at instantiateModule (.next/server/chunks/[turbopack]_runtime.js:740:9)
+    at instantiateRuntimeModule (.next/server/chunks/[turbopack]_runtime.js:768:12)
+    at getOrInstantiateRuntimeModule (.next/server/chunks/[turbopack]_runtime.js:781:12)
+    at Object.m (.next/server/chunks/[turbopack]_runtime.js:790:18)
+    at Object.<anonymous> (.next/server/app/api/confirm-claim/route.js:8:3)
+
+> Build error occurred
+Error: Failed to collect page data for /api/confirm-claim
+    at ignore-listed frames {
+  type: 'Error'
+}

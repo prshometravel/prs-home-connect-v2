@@ -1,32 +1,38 @@
-import Stripe from "stripe";
 import { NextResponse } from "next/server";
+import Stripe from "stripe";
+
+export const runtime = "nodejs"; // Stripe needs Node runtime
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2024-06-20",
+});
+
+function baseUrl(req: Request) {
+  const url = new URL(req.url);
+  // Works local + Vercel behind proxy
+  const forwardedHost = req.headers.get("x-forwarded-host");
+  const forwardedProto = req.headers.get("x-forwarded-proto");
+  if (forwardedHost) {
+    return `${forwardedProto || "https"}://${forwardedHost}`;
+  }
+  return `${url.protocol}//${url.host}`;
+}
 
 export async function POST(req: Request) {
   try {
-    const secretKey = process.env.STRIPE_SECRET_KEY;
+    const body = await req.json();
 
-    if (!secretKey) {
+    const jobId = String(body?.jobId || "");
+    const proUserId = String(body?.proUserId || "");
+
+    if (!jobId || !proUserId) {
       return NextResponse.json(
-        { error: "Missing STRIPE_SECRET_KEY" },
-        { status: 500 }
+        { error: "Missing jobId or proUserId" },
+        { status: 400 }
       );
     }
 
-    const stripe = new Stripe(secretKey, {
-      apiVersion: "2023-10-16",
-    });
-
-    const body = await req.json();
-    const jobId = body?.jobId;
-
-    if (!jobId) {
-      return NextResponse.json({ error: "Missing jobId" }, { status: 400 });
-    }
-
-    const origin =
-      req.headers.get("origin") ||
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      "http://localhost:3000";
+    const origin = baseUrl(req);
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -35,22 +41,31 @@ export async function POST(req: Request) {
         {
           price_data: {
             currency: "usd",
+            product_data: {
+              name: "PRS Home Connect Lead",
+              description: `Job ID: ${jobId}`,
+            },
             unit_amount: 1000, // $10
-            product_data: { name: "Job Lead – PRS Home Connect" },
           },
           quantity: 1,
         },
       ],
-      success_url: `${origin}/pro/jobs?paid=1&jobId=${encodeURIComponent(
-        jobId
-      )}`,
-      cancel_url: `${origin}/pro/jobs?canceled=1`,
-      metadata: { job_id: String(jobId) },
+      // We'll finalize claim AFTER Stripe success (webhook or success page call)
+      metadata: {
+        jobId,
+        proUserId,
+        type: "lead_payment",
+      },
+     success_url: `${origin}/pro/claim/success?session_id={CHECKOUT_SESSION_ID}&job_id=${jobId}`,
+      cancel_url: `${origin}/pro/dashboard?checkout=cancelled`,
     });
 
     return NextResponse.json({ url: session.url });
   } catch (err: any) {
     console.error("Stripe checkout error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json(
+      { error: err?.message || "Stripe checkout failed" },
+      { status: 500 }
+    );
   }
 }
