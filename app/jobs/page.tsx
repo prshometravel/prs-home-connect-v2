@@ -3,27 +3,26 @@
 export const dynamic = "force-dynamic";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+type AnyObj = Record<string, any>;
 
 type Job = {
   id: string;
   created_at?: string | null;
-  title?: string | null;
-  description?: string | null;
-  category?: string | null;
-  location?: string | null;
-  status?: string | null;
-  address?: string | null;
+  title?: any;
+  description?: any;
+  category?: any;
+  location?: any; // can be string OR object OR null
+  status?: any; // open / claimed / complete (or variations)
   homeowner_id?: string | null;
-  customer_id?: string | null;
   claimed_by?: string | null;
   hired_pro_id?: string | null;
-  lead_fee_paid?: boolean | null;
 };
 
 const COLORS = {
   bg: "#0A1E3F",
   card: "#112B55",
-  card2: "#0E254A",
   border: "#1F3B7A",
   text: "#EAF2FF",
   subtext: "#BBD0FF",
@@ -32,47 +31,96 @@ const COLORS = {
   danger: "#EF4444",
 };
 
-function fmtDate(iso?: string | null) {
+function safeText(v: any): string {
+  if (typeof v === "string") return v;
+  if (v === null || v === undefined) return "";
+  // if it’s something else (object/number), stringify safely
+  try {
+    return String(v);
+  } catch {
+    return "";
+  }
+}
+
+function clean(v: any): string {
+  const s = safeText(v);
+  return typeof s === "string" ? s.trim() : "";
+}
+
+function fmtDate(iso?: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleString();
 }
 
-function statusLabel(s?: string | null) {
-  const v = (s || "").toLowerCase();
-  if (!v) return "Open";
-  if (v.includes("claim")) return "Claimed";
-  if (v.includes("hire")) return "Hired";
-  if (v.includes("close")) return "Closed";
-  if (v.includes("nego")) return "Negotiating";
-  return s || "Open";
+// location can be:
+// - "Lawrenceville, GA"
+// - JSON string: {"city":"Lawrenceville","state":"GA","stateLabel":"Georgia"}
+// - object: { city, state, stateLabel }
+function formatLocation(loc: any): string {
+  if (!loc) return "Location not set";
+
+  // string case
+  if (typeof loc === "string") {
+    const s = loc.trim();
+    if (!s) return "Location not set";
+
+    // try parse JSON if it looks like JSON
+    if ((s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"))) {
+      try {
+        const parsed = JSON.parse(s);
+        return formatLocation(parsed);
+      } catch {
+        // not JSON, treat as plain string
+        return s;
+      }
+    }
+    return s;
+  }
+
+  // object case
+  if (typeof loc === "object") {
+    const city = clean(loc.city);
+    const state = clean(loc.state);
+    const stateLabel = clean(loc.stateLabel);
+
+    const stateText = stateLabel || state;
+    const parts = [city, stateText].filter(Boolean);
+    return parts.length ? parts.join(", ") : "Location not set";
+  }
+
+  return "Location not set";
 }
 
-function statusStyles(s?: string | null) {
-  const v = (s || "").toLowerCase();
-  if (v.includes("close")) return { bg: "#0b2a24", bd: "#16a34a", tx: "#86efac" };
-  if (v.includes("hire")) return { bg: "#0b243d", bd: "#38bdf8", tx: "#a5f3fc" };
-  if (v.includes("claim")) return { bg: "#2a1b0b", bd: "#f59e0b", tx: "#fde68a" };
-  if (v.includes("nego")) return { bg: "#261a35", bd: "#a78bfa", tx: "#ddd6fe" };
-  return { bg: "#0b1e3a", bd: "#60a5fa", tx: "#bfdbfe" };
+function statusLabel(job: Job): "Open" | "Claimed" | "Complete" {
+  const raw = clean(job.status).toLowerCase();
+
+  // if your DB stores variations, normalize them:
+  if (raw.includes("complete") || raw === "done" || raw === "closed") return "Complete";
+  if (raw.includes("claim") || clean(job.claimed_by) || clean(job.hired_pro_id)) return "Claimed";
+  return "Open";
 }
 
 export default function JobsPage() {
+  const router = useRouter();
+
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string>("");
-  const [query, setQuery] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
 
   async function loadJobs() {
     try {
       setErr("");
       setLoading(true);
+
       const res = await fetch("/api/jobs/list", { cache: "no-store" });
       if (!res.ok) throw new Error(`Failed to load jobs (${res.status})`);
-      const data = (await res.json()) as Job[];
-      setJobs(Array.isArray(data) ? data : []);
+
+      const data = (await res.json()) as any;
+      const list = Array.isArray(data) ? data : Array.isArray(data?.jobs) ? data.jobs : [];
+
+      setJobs(list as Job[]);
     } catch (e: any) {
       setErr(e?.message || "Failed to load jobs");
       setJobs([]);
@@ -85,363 +133,245 @@ export default function JobsPage() {
     loadJobs();
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return jobs; // SHOW ALL BY DEFAULT
-    return jobs.filter((j) => {
-      const hay = [
-        j.title,
-        j.description,
-        j.category,
-        j.location,
-        j.status,
-        j.address,
-        j.id,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(q);
-    });
-  }, [jobs, query]);
+  const normalized = useMemo(() => {
+    return jobs.map((j) => {
+      const title = clean(j.title) || "Job";
+      const category = clean(j.category);
+      const description = clean(j.description);
+      const where = formatLocation(j.location);
+      const posted = fmtDate(j.created_at);
+      const status = statusLabel(j);
 
-  const total = jobs.length;
-  const showing = filtered.length;
+      return {
+        ...j,
+        _title: title,
+        _category: category,
+        _description: description,
+        _where: where,
+        _posted: posted,
+        _status: status,
+      };
+    });
+  }, [jobs]);
 
   return (
     <div
       style={{
         minHeight: "100vh",
-        background: `linear-gradient(180deg, ${COLORS.bg} 0%, #071633 100%)`,
+        background: COLORS.bg,
         color: COLORS.text,
+        padding: 16,
       }}
     >
-      {/* Top Bar */}
+      {/* Top bar */}
       <div
         style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 50,
-          background: `linear-gradient(180deg, #0B2349 0%, #081C3B 100%)`,
-          borderBottom: `1px solid ${COLORS.border}`,
+          maxWidth: 1100,
+          margin: "0 auto 14px auto",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
         }}
       >
-        <div
-          style={{
-            maxWidth: 1100,
-            margin: "0 auto",
-            padding: "12px 14px",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-          }}
-        >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button
-            onClick={() => (window.location.href = "/")}
+            onClick={() => router.push("/")}
             style={{
-              border: `1px solid ${COLORS.border}`,
-              background: "#0B2349",
-              color: COLORS.text,
-              padding: "8px 12px",
+              background: COLORS.green2,
+              color: "#06210f",
+              border: `1px solid ${COLORS.green}`,
+              padding: "10px 14px",
               borderRadius: 10,
+              fontWeight: 800,
               cursor: "pointer",
-              fontWeight: 700,
             }}
           >
             Home
           </button>
 
-          <div style={{ fontWeight: 900, letterSpacing: 0.3 }}>Jobs</div>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>Jobs</div>
+        </div>
 
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
-            <button
-              onClick={() => {
-                setMenuOpen((v) => !v);
-              }}
-              style={{
-                border: `1px solid ${COLORS.border}`,
-                background: "#0B2349",
-                color: COLORS.text,
-                padding: "8px 12px",
-                borderRadius: 10,
-                cursor: "pointer",
-                fontWeight: 800,
-              }}
-            >
-              Menu ▾
-            </button>
+        <button
+          onClick={loadJobs}
+          style={{
+            background: "transparent",
+            color: COLORS.text,
+            border: `1px solid ${COLORS.border}`,
+            padding: "10px 14px",
+            borderRadius: 10,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Refresh
+        </button>
+      </div>
 
-            {menuOpen && (
+      {/* Status / errors */}
+      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+        {err ? (
+          <div
+            style={{
+              background: "rgba(239,68,68,0.14)",
+              border: `1px solid ${COLORS.danger}`,
+              color: COLORS.text,
+              padding: 12,
+              borderRadius: 12,
+              marginBottom: 14,
+              fontWeight: 700,
+            }}
+          >
+            {err}
+          </div>
+        ) : null}
+
+        {loading ? (
+          <div
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              border: `1px solid ${COLORS.border}`,
+              padding: 14,
+              borderRadius: 12,
+              fontWeight: 700,
+            }}
+          >
+            Loading jobs…
+          </div>
+        ) : null}
+      </div>
+
+      {/* Cards list (ONE PER ROW) */}
+      <div
+        style={{
+          maxWidth: 1100,
+          margin: "12px auto 0 auto",
+          display: "grid",
+          gridTemplateColumns: "1fr", // ✅ ONE CARD PER ROW
+          gap: 12,
+        }}
+      >
+        {(!loading && normalized.length === 0) ? (
+          <div
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              border: `1px solid ${COLORS.border}`,
+              padding: 14,
+              borderRadius: 12,
+              color: COLORS.subtext,
+              fontWeight: 700,
+            }}
+          >
+            No jobs found.
+          </div>
+        ) : null}
+
+        {normalized.map((j: any) => (
+          <div
+            key={j.id}
+            style={{
+              background: COLORS.card,
+              border: `1px solid ${COLORS.border}`,
+              borderRadius: 14,
+              padding: 14, // ✅ slightly smaller clean card
+              boxShadow: "0 10px 28px rgba(0,0,0,0.25)",
+            }}
+          >
+            {/* Header row */}
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 18, fontWeight: 900, lineHeight: 1.2 }}>
+                  {j._title}
+                </div>
+
+                <div style={{ marginTop: 6, color: COLORS.subtext, fontWeight: 700 }}>
+                  {j._category ? `${j._category} • ` : ""}{j._where}
+                </div>
+              </div>
+
+              {/* Status pill (ONLY thing customer needs) */}
               <div
                 style={{
-                  position: "absolute",
-                  right: 16,
-                  top: 56,
-                  width: 220,
-                  background: COLORS.card,
+                  background: j._status === "Complete"
+                    ? "rgba(34,197,94,0.18)"
+                    : j._status === "Claimed"
+                      ? "rgba(34,197,94,0.12)"
+                      : "rgba(255,255,255,0.08)",
+                  border: `1px solid ${
+                    j._status === "Complete" || j._status === "Claimed"
+                      ? COLORS.green
+                      : COLORS.border
+                  }`,
+                  color: j._status === "Open" ? COLORS.subtext : COLORS.text,
+                  padding: "8px 12px",
+                  borderRadius: 999,
+                  fontWeight: 900,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {j._status}
+              </div>
+            </div>
+
+            {/* Progress bar (simple, based on status) */}
+            <div style={{ marginTop: 10 }}>
+              <div
+                style={{
+                  height: 8,
+                  borderRadius: 999,
+                  background: "rgba(255,255,255,0.10)",
                   border: `1px solid ${COLORS.border}`,
-                  borderRadius: 14,
-                  boxShadow: "0 14px 30px rgba(0,0,0,0.35)",
                   overflow: "hidden",
                 }}
               >
-                <MenuItem label="Home" href="/" onPick={() => setMenuOpen(false)} />
-                <MenuItem label="Post a Job" href="/homeowner/post-job" onPick={() => setMenuOpen(false)} />
-                <MenuItem label="Homeowner Dashboard" href="/homeowner/dashboard" onPick={() => setMenuOpen(false)} />
-                <MenuItem label="Pro Dashboard" href="/pro/dashboard" onPick={() => setMenuOpen(false)} />
-                <MenuItem label="Sign In" href="/signin" onPick={() => setMenuOpen(false)} />
+                <div
+                  style={{
+                    height: "100%",
+                    width:
+                      j._status === "Complete"
+                        ? "100%"
+                        : j._status === "Claimed"
+                          ? "55%"
+                          : "10%",
+                    background: COLORS.green,
+                    borderRadius: 999,
+                  }}
+                />
               </div>
-            )}
-          </div>
-        </div>
-      </div>
 
-      {/* Content */}
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 14px 28px" }}>
-        {/* Controls */}
-        <div
-          style={{
-            background: `linear-gradient(180deg, ${COLORS.card} 0%, ${COLORS.card2} 100%)`,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: 18,
-            padding: 14,
-          }}
-        >
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-            <button
-              onClick={() => (window.location.href = "/homeowner/post-job")}
-              style={{
-                border: "none",
-                background: `linear-gradient(180deg, ${COLORS.green} 0%, ${COLORS.green2} 100%)`,
-                color: "#05220f",
-                padding: "10px 14px",
-                borderRadius: 12,
-                cursor: "pointer",
-                fontWeight: 900,
-              }}
-            >
-              Post a Job
-            </button>
+              <div style={{ marginTop: 6, color: COLORS.subtext, fontWeight: 700, fontSize: 12 }}>
+                Progress: {j._status === "Complete" ? "100%" : j._status === "Claimed" ? "55%" : "10%"}
+              </div>
+            </div>
 
-            <button
-              onClick={loadJobs}
-              style={{
-                border: `1px solid ${COLORS.border}`,
-                background: "#0B2349",
-                color: COLORS.text,
-                padding: "10px 14px",
-                borderRadius: 12,
-                cursor: "pointer",
-                fontWeight: 900,
-              }}
-            >
-              Refresh
-            </button>
-
-            <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search (optional) — all jobs show by default"
+            {/* Description */}
+            {j._description ? (
+              <div
                 style={{
-                  width: 360,
-                  maxWidth: "100%",
-                  padding: "10px 12px",
-                  borderRadius: 12,
+                  marginTop: 10,
+                  background: "rgba(255,255,255,0.06)",
                   border: `1px solid ${COLORS.border}`,
-                  background: "#071A34",
+                  borderRadius: 12,
+                  padding: 12,
                   color: COLORS.text,
-                  outline: "none",
+                  fontWeight: 700,
+                  lineHeight: 1.35,
                 }}
-              />
-
-              <div style={{ fontSize: 12, color: COLORS.subtext, fontWeight: 700 }}>
-                Showing {showing} / {total}
+              >
+                {j._description}
               </div>
-            </div>
-          </div>
+            ) : null}
 
-          {/* Error / Loading */}
-          {err && (
-            <div
-              style={{
-                marginTop: 12,
-                padding: 12,
-                borderRadius: 12,
-                border: `1px solid ${COLORS.danger}`,
-                background: "#2b0d10",
-                color: "#fecaca",
-                fontWeight: 700,
-              }}
-            >
-              {err}
-            </div>
-          )}
-
-          {loading && (
-            <div style={{ marginTop: 12, color: COLORS.subtext, fontWeight: 700 }}>Loading jobs…</div>
-          )}
-        </div>
-
-        {/* Long List */}
-        <div
-          style={{
-            marginTop: 14,
-            background: `linear-gradient(180deg, ${COLORS.card} 0%, ${COLORS.card2} 100%)`,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: 18,
-            padding: 14,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-            <div style={{ fontSize: 18, fontWeight: 900 }}>All Jobs</div>
-            <div style={{ fontSize: 12, color: COLORS.subtext, fontWeight: 700 }}>
-              Scroll the list — it stays long and shows everything.
-            </div>
-          </div>
-
-          <div
-            style={{
-              marginTop: 12,
-              maxHeight: 560, // LONG LIST AREA
-              overflowY: "auto",
-              paddingRight: 6,
-            }}
-          >
-            {!loading && !err && filtered.length === 0 && (
-              <div style={{ color: COLORS.subtext, fontWeight: 700, padding: 12 }}>
-                No jobs found for that search.
+            {/* Posted date only (NO ID) */}
+            {j._posted ? (
+              <div style={{ marginTop: 10, color: COLORS.subtext, fontWeight: 700, fontSize: 12 }}>
+                Posted: {j._posted}
               </div>
-            )}
-
-            <div style={{ display: "grid", gap: 12 }}>
-              {filtered.map((j, idx) => {
-                const st = statusStyles(j.status);
-                const title = (j.title || "").trim() || "Job";
-                const category = (j.category || "").trim();
-                const location = (j.location || "").trim();
-                const desc = (j.description || "").trim();
-                const created = fmtDate(j.created_at);
-
-                return (
-                  <div
-                    key={j.id || idx}
-                    style={{
-                      borderRadius: 16,
-                      border: `1px solid ${COLORS.border}`,
-                      background: "#071A34",
-                      padding: 14,
-                      display: "grid",
-                      gap: 10,
-                    }}
-                  >
-                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                      <div style={{ fontWeight: 900, fontSize: 16 }}>{title}</div>
-
-                      <span
-                        style={{
-                          marginLeft: "auto",
-                          padding: "6px 10px",
-                          borderRadius: 999,
-                          background: st.bg,
-                          border: `1px solid ${st.bd}`,
-                          color: st.tx,
-                          fontWeight: 900,
-                          fontSize: 12,
-                        }}
-                      >
-                        {statusLabel(j.status)}
-                      </span>
-                    </div>
-
-                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", color: COLORS.subtext, fontWeight: 700 }}>
-                      {category && <span>Category: {category}</span>}
-                      {location && <span>Location: {location}</span>}
-                      {created && <span>Posted: {created}</span>}
-                    </div>
-
-                    {desc && (
-                      <div style={{ color: COLORS.text, lineHeight: 1.4 }}>
-                        {desc}
-                      </div>
-                    )}
-
-                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      <button
-                        onClick={() => alert(`Job ID: ${j.id}`)}
-                        style={{
-                          border: `1px solid ${COLORS.border}`,
-                          background: "#0B2349",
-                          color: COLORS.text,
-                          padding: "10px 12px",
-                          borderRadius: 12,
-                          cursor: "pointer",
-                          fontWeight: 900,
-                        }}
-                      >
-                        View Details
-                      </button>
-
-                      <button
-                        onClick={() => (window.location.href = "/homeowner/post-job")}
-                        style={{
-                          border: "none",
-                          background: `linear-gradient(180deg, ${COLORS.green} 0%, ${COLORS.green2} 100%)`,
-                          color: "#05220f",
-                          padding: "10px 12px",
-                          borderRadius: 12,
-                          cursor: "pointer",
-                          fontWeight: 900,
-                        }}
-                      >
-                        Post Another Job
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            ) : null}
           </div>
-        </div>
-
-        {/* Footer */}
-        <div style={{ marginTop: 14, color: "#9db7ff", fontSize: 12, textAlign: "center", opacity: 0.95 }}>
-          Sponsored by Sista&apos;s Compassionate Care Services • Built by PRS Home Improvement and Security LLC
-        </div>
+        ))}
       </div>
     </div>
-  );
-}
-
-function MenuItem({
-  label,
-  href,
-  onPick,
-}: {
-  label: string;
-  href: string;
-  onPick: () => void;
-}) {
-  return (
-    <button
-      onClick={() => {
-        onPick();
-        window.location.href = href;
-      }}
-      style={{
-        width: "100%",
-        textAlign: "left",
-        padding: "12px 12px",
-        background: "transparent",
-        border: "none",
-        cursor: "pointer",
-        color: "#EAF2FF",
-        fontWeight: 900,
-      }}
-      onMouseEnter={(e) => ((e.currentTarget.style.background = "#0B2349"))}
-      onMouseLeave={(e) => ((e.currentTarget.style.background = "transparent"))}
-    >
-      {label}
-    </button>
   );
 }
