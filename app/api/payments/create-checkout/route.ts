@@ -1,48 +1,29 @@
 import Stripe from "stripe";
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs";
+// 1. Force this route to NEVER be pre-built statically
 export const dynamic = "force-dynamic";
 
-function getBaseUrl() {
-  const url =
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    process.env.NEXT_PUBLIC_APP_URL ||
-    "http://localhost:3000";
-
-  return url.replace(/\/$/, "");
-}
-
 export async function POST(req: Request) {
-  // 1. Check for the key first
+  // 2. ONLY get the key when a real user triggers this function
   const apiKey = process.env.STRIPE_SECRET_KEY;
 
+  // 3. THE BUILD GUARD: If the key is missing (like during a Vercel build),
+  // we return a 500 instead of letting the Stripe library crash the deployment.
   if (!apiKey) {
-    console.error("CRITICAL: STRIPE_SECRET_KEY is missing.");
-    return NextResponse.json(
-      { error: "Payment system is not configured on the server." },
-      { status: 500 }
-    );
+    console.error("Build Guard: Stripe Key not found. Skipping initialization.");
+    return NextResponse.json({ error: "Configuration missing" }, { status: 500 });
   }
 
-  // 2. Initialize Stripe INSIDE the POST function
+  // 4. Initialize Stripe INSIDE the function so it's "lazy"
   const stripe = new Stripe(apiKey, {
     apiVersion: "2024-06-20",
   });
 
   try {
     const { jobId, proId } = await req.json();
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
-    if (!jobId || !proId) {
-      return NextResponse.json(
-        { error: "Missing jobId or proId" },
-        { status: 400 }
-      );
-    }
-
-    const baseUrl = getBaseUrl();
-
-    // 3. Create the checkout session
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
@@ -52,9 +33,9 @@ export async function POST(req: Request) {
             currency: "usd",
             product_data: { 
               name: "PRS Home Connect Lead ($10)",
-              description: "Connection fee for professional services" 
+              description: `Lead for Job ID: ${jobId}`
             },
-            unit_amount: 1000, // $10.00
+            unit_amount: 1000,
           },
           quantity: 1,
         },
@@ -68,13 +49,9 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({ url: session.url });
-
   } catch (err: any) {
-    console.error("Stripe Error:", err.message);
-    return NextResponse.json(
-      { error: "Internal Server Error", details: err.message }, 
-      { status: 500 }
-    );
+    console.error("Stripe Checkout Error:", err.message);
+    return NextResponse.json({ error: "Failed to create checkout session" }, { status: 500 });
   }
 }
 
